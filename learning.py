@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-
-# E. Culurciello, L. Mueller, Z. Boztoprak
-# December 2020
-
 import itertools as it
 import os
 import random
@@ -20,32 +15,34 @@ import vizdoom as vzd
 
 
 # Q-learning settings
-learning_rate = 0.00025
+learning_rate = 0.005
 discount_factor = 0.99
-train_epochs = 5
-learning_steps_per_epoch = 2000
+train_epochs = 1
+learning_steps_per_epoch = 1000
 replay_memory_size = 10000
 
 # NN learning settings
 batch_size = 64
 
 # Training regime
-test_episodes_per_epoch = 100
+test_episodes_per_epoch = 1000
 
 # Other parameters
 frame_repeat = 12
 resolution = (30, 45)
-episodes_to_watch = 10
+episodes_to_watch = 50
 
-model_savefile = "./model-doom.pth"
 save_model = True
 load_model = False
-skip_learning = True
+skip_learning = False
 
 # Configuration file path
-config_file_path = os.path.join(vzd.scenarios_path, "simpler_basic.cfg")
-# config_file_path = os.path.join(vzd.scenarios_path, "rocket_basic.cfg")
-# config_file_path = os.path.join(vzd.scenarios_path, "basic.cfg")
+file_path_cfg = "deathmatch.cfg" #"simpler_basic.cfg" # docs/scenarios_path.txt
+config_file_path = os.path.join(vzd.scenarios_path, file_path_cfg) 
+
+
+model_savefile = "./model-doom-{}.pth".format(file_path_cfg.replace(".cfg", ""))
+
 
 # Uses GPU if available
 if torch.cuda.is_available():
@@ -57,24 +54,28 @@ else:
 print("Using device:", DEVICE)
 print("Device name:", torch.cuda.get_device_name(device=DEVICE))
 
+###############################################################################################################################
 
 def preprocess(img):
     """Down samples image to resolution"""
     img = skimage.transform.resize(img, resolution)
     img = img.astype(np.float32)
     img = np.expand_dims(img, axis=0)
+
     return img
 
 
 def create_simple_game():
-    print("Initializing doom...")
+    print("\nInitializing doom...")
+
     game = vzd.DoomGame()
     game.load_config(config_file_path)
     game.set_window_visible(False)
     game.set_mode(vzd.Mode.PLAYER)
-    game.set_screen_format(vzd.ScreenFormat.GRAY8)
+    game.set_screen_format(vzd.ScreenFormat.GRAY8) # todo, verificar com cores
     game.set_screen_resolution(vzd.ScreenResolution.RES_640X480)
     game.init()
+    
     print("Doom initialized.")
 
     return game
@@ -82,19 +83,24 @@ def create_simple_game():
 
 def test(game, agent):
     """Runs a test_episodes_per_epoch episodes and prints the result"""
+    
     print("\nTesting...")
+
     test_scores = []
     for test_episode in trange(test_episodes_per_epoch, leave=False):
         game.new_episode()
+
         while not game.is_episode_finished():
             state = preprocess(game.get_state().screen_buffer)
             best_action_index = agent.get_action(state)
 
             game.make_action(actions[best_action_index], frame_repeat)
+
         r = game.get_total_reward()
         test_scores.append(r)
 
     test_scores = np.array(test_scores)
+
     print(
         "Results: mean: {:.1f} +/- {:.1f},".format(
             test_scores.mean(), test_scores.std()
@@ -116,10 +122,11 @@ def run(game, agent, actions, num_epochs, frame_repeat, steps_per_epoch=2000):
         game.new_episode()
         train_scores = []
         global_step = 0
+
         print(f"\nEpoch #{epoch + 1}")
 
         for _ in trange(steps_per_epoch, leave=False):
-            state = preprocess(game.get_state().screen_buffer)
+            state = preprocess(game.get_state().screen_buffer) ## pega a tela do jogo e transforma em escala de cinza e redimensiona
             action = agent.get_action(state)
             reward = game.make_action(actions[action], frame_repeat)
             done = game.is_episode_finished()
@@ -145,34 +152,38 @@ def run(game, agent, actions, num_epochs, frame_repeat, steps_per_epoch=2000):
 
         print(
             "Results: mean: {:.1f} +/- {:.1f},".format(
-                train_scores.mean(), train_scores.std()
+                train_scores.mean(), # media - valor medio dos scores
+                train_scores.std() # desvio padrao - quanto os valores se afastam da media
             ),
-            "min: %.1f," % train_scores.min(),
-            "max: %.1f," % train_scores.max(),
+
+            "min: %.1f," % train_scores.min(), # minimo - menor valor dos scores
+            "max: %.1f," % train_scores.max(), # maximo - maior valor dos scores
         )
 
-        test(game, agent)
-        if save_model:
-            print("Saving the network weights to:", model_savefile)
-            torch.save(agent.q_net, model_savefile)
+        #test(game, agent) # todo, ver se faz sentido testar a cada epoca
+
+        
         print("Total elapsed time: %.2f minutes" % ((time() - start_time) / 60.0))
+
+    if save_model:
+        print("Saving the network weights to:", model_savefile)
+        torch.save(agent.q_net, model_savefile)
+
+    test(game, agent)
 
     game.close()
     return agent, game
 
 
 class DuelQNet(nn.Module):
-    """
-    This is Duel DQN architecture.
-    see https://arxiv.org/abs/1511.06581 for more information.
-    """
-
     def __init__(self, available_actions_count):
         super().__init__()
+        # 1 -> 8 -> 8 -> 16
+
         self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 8, kernel_size=3, stride=2, bias=False),
-            nn.BatchNorm2d(8),
-            nn.ReLU(),
+            nn.Conv2d(1, 8, kernel_size=3, stride=2, bias=False),# uma camada convolucional com 8 canais de entrada e saída, kernel de tamanho 3x3, e stride 1.
+            nn.BatchNorm2d(8),# uma camada convolucional com 8 canais de entrada e saída, kernel de tamanho 3x3, e stride 1.
+            nn.ReLU(),# função de ativação ReLU para introduzir não-linearidade.
         )
 
         self.conv2 = nn.Sequential(
@@ -193,39 +204,53 @@ class DuelQNet(nn.Module):
             nn.ReLU(),
         )
 
-        self.state_fc = nn.Sequential(nn.Linear(96, 64), nn.ReLU(), nn.Linear(64, 1))
+        # Value function - calculates the value of the state (calculates how good the state is, no matter the action)
+        self.state_fc = nn.Sequential(
+            nn.Linear(96, 64), #camada linear que reduz a entrada de 96 para 64 neurônios
+            nn.ReLU(), # função de ativação ReLU
+            nn.Linear(64, 1)# camada linear que reduz a entrada de 64 para 1 neurônio, representando o valor do estado.
+            )
 
+        # Advantage function - calculates the relative advantage of each action in the state
         self.advantage_fc = nn.Sequential(
-            nn.Linear(96, 64), nn.ReLU(), nn.Linear(64, available_actions_count)
+            nn.Linear(96, 64), # camada linear que reduz a entrada de 96 para 64 neurônios
+            nn.ReLU(), # função de ativação ReLU
+            nn.Linear(64, available_actions_count) # camada linear que reduz a entrada de 64 para o número de ações disponíveis, representando a vantagem de cada ação.
         )
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.conv3(x)
-        x = self.conv4(x)
-        x = x.view(-1, 192)
-        x1 = x[:, :96]  # input for the net to calculate the state value
-        x2 = x[:, 96:]  # relative advantage of actions in the state
-        state_value = self.state_fc(x1).reshape(-1, 1)
-        advantage_values = self.advantage_fc(x2)
-        x = state_value + (
-            advantage_values - advantage_values.mean(dim=1).reshape(-1, 1)
+        x = self.conv1(x) # aplica a primeira camada convolucional
+        x = self.conv2(x) # aplica a segunda camada convolucional
+        x = self.conv3(x) # aplica a terceira camada convolucional
+        x = self.conv4(x) # aplica a quarta camada convolucional
+
+        x = x.view(-1, 192) # achata a saída da última camada convolucional para um vetor de tamanho 192
+
+        x1 = x[:, :96]  # get the first 96 elements from the flat vector, to calculates the state value
+        x2 = x[:, 96:]  # get the last 96 elements from the flat vector, to calculates the advantage values
+
+        state_value = self.state_fc(x1).reshape(-1, 1) # calcula o valor do estado usando a rede neural
+
+        advantage_values = self.advantage_fc(x2) # calcula a vantagem de cada ação usando a rede neural
+
+        # Combina o valor do estado e as vantagens das ações para calcular os valores Q
+        x = state_value + ( # soma o valor do estado com as vantagens das ações 
+            advantage_values - advantage_values.mean(dim=1).reshape(-1, 1) # subtrai a média das vantagens das ações
         )
 
-        return x
+        return x # retorna os valores Q para cada ação
 
 
 class DQNAgent:
     def __init__(
         self,
-        action_size,
-        memory_size,
-        batch_size,
-        discount_factor,
-        lr,
-        load_model,
-        epsilon=1,
+        action_size, # the number of possible actions
+        memory_size, # the maximum size of the replay memory
+        batch_size, # the number of experiences to sample from the replay memory
+        discount_factor, # the discount factor for future rewards
+        lr, # the learning rate
+        load_model, # whether to load a pre-trained model
+        epsilon=1,  # the initial exploration rate (epsilon-greedy strategy) - https://www.youtube.com/watch?v=e3L4VocZnnQ
         epsilon_decay=0.9996,
         epsilon_min=0.1,
     ):
@@ -241,8 +266,8 @@ class DQNAgent:
 
         if load_model:
             print("Loading model from: ", model_savefile)
-            self.q_net = torch.load(model_savefile)
-            self.target_net = torch.load(model_savefile)
+            self.q_net = torch.load(model_savefile, weights_only=False)
+            self.target_net = torch.load(model_savefile, weights_only=False)
             self.epsilon = self.epsilon_min
 
         else:
@@ -250,7 +275,7 @@ class DQNAgent:
             self.q_net = DuelQNet(action_size).to(DEVICE)
             self.target_net = DuelQNet(action_size).to(DEVICE)
 
-        self.opt = optim.SGD(self.q_net.parameters(), lr=self.lr)
+        self.opt = optim.SGD(self.q_net.parameters(), lr=self.lr) # todo, aprimorar usar adam ou rmsprop
 
     def get_action(self, state):
         if np.random.uniform() < self.epsilon:
@@ -280,8 +305,6 @@ class DQNAgent:
 
         row_idx = np.arange(self.batch_size)  # used for indexing the batch
 
-        # value of the next states with double q learning
-        # see https://arxiv.org/abs/1509.06461 for more information on double q learning
         with torch.no_grad():
             next_states = torch.from_numpy(next_states).float().to(DEVICE)
             idx = row_idx, np.argmax(self.q_net(next_states).cpu().data.numpy(), 1)
@@ -313,8 +336,11 @@ class DQNAgent:
 if __name__ == "__main__":
     # Initialize game and actions
     game = create_simple_game()
-    n = game.get_available_buttons_size()
+    n = game.get_available_buttons_size() # get number of buttons - docs/buttons_available.txt
+
+    # Available actions: [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]]
     actions = [list(a) for a in it.product([0, 1], repeat=n)]
+
 
     # Initialize our agent with the set parameters
     agent = DQNAgent(
