@@ -1,6 +1,9 @@
 # Project
-resource/ViZDoom
-
+ViZDoom
+logs/
+logs_*
+train/
+train_*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

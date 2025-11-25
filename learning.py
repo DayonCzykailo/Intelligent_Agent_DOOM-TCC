@@ -18,14 +18,14 @@ import vizdoom as vzd
 learning_rate = 0.005
 discount_factor = 0.99
 train_epochs = 1
-learning_steps_per_epoch = 1000
+learning_steps_per_epoch = 100000
 replay_memory_size = 10000
 
 # NN learning settings
 batch_size = 64
 
 # Training regime
-test_episodes_per_epoch = 1000
+test_episodes_per_epoch = 10
 
 # Other parameters
 frame_repeat = 12
@@ -37,7 +37,7 @@ load_model = False
 skip_learning = False
 
 # Configuration file path
-file_path_cfg = "deathmatch.cfg" #"simpler_basic.cfg" # docs/scenarios_path.txt
+file_path_cfg = "defend_the_center.cfg" #"deathmatch.cfg" #"simpler_basic.cfg" # docs/scenarios_path.txt
 config_file_path = os.path.join(vzd.scenarios_path, file_path_cfg) 
 
 
@@ -118,6 +118,7 @@ def run(game, agent, actions, num_epochs, frame_repeat, steps_per_epoch=2000):
 
     start_time = time()
 
+
     for epoch in range(num_epochs):
         game.new_episode()
         train_scores = []
@@ -126,9 +127,11 @@ def run(game, agent, actions, num_epochs, frame_repeat, steps_per_epoch=2000):
         print(f"\nEpoch #{epoch + 1}")
 
         for _ in trange(steps_per_epoch, leave=False):
-            state = preprocess(game.get_state().screen_buffer) ## pega a tela do jogo e transforma em escala de cinza e redimensiona
+
+            game_state = game.get_state()
+            state = preprocess(game_state.screen_buffer) ## pega a tela do jogo e transforma em escala de cinza e redimensiona
             action = agent.get_action(state)
-            reward = game.make_action(actions[action], frame_repeat)
+            reward = game.make_action(actions[action], frame_repeat) - game_state.game_variables[0] * 5 # -0.01 for using ammo
             done = game.is_episode_finished()
 
             if not done:
@@ -150,17 +153,17 @@ def run(game, agent, actions, num_epochs, frame_repeat, steps_per_epoch=2000):
         agent.update_target_net()
         train_scores = np.array(train_scores)
 
-        print(
-            "Results: mean: {:.1f} +/- {:.1f},".format(
-                train_scores.mean(), # media - valor medio dos scores
-                train_scores.std() # desvio padrao - quanto os valores se afastam da media
-            ),
+        # print(
+        #     "Results: mean: {:.1f} +/- {:.1f},".format(
+        #         train_scores.mean(), # media - valor medio dos scores
+        #         train_scores.std() # desvio padrao - quanto os valores se afastam da media
+        #     ),
 
-            "min: %.1f," % train_scores.min(), # minimo - menor valor dos scores
-            "max: %.1f," % train_scores.max(), # maximo - maior valor dos scores
-        )
+        #     "min: %.1f," % train_scores.min(), # minimo - menor valor dos scores
+        #     "max: %.1f," % train_scores.max(), # maximo - maior valor dos scores
+        # )
 
-        #test(game, agent) # todo, ver se faz sentido testar a cada epoca
+        # test(game, agent) # todo, ver se faz sentido testar a cada epoca
 
         
         print("Total elapsed time: %.2f minutes" % ((time() - start_time) / 60.0))
@@ -339,7 +342,8 @@ if __name__ == "__main__":
     n = game.get_available_buttons_size() # get number of buttons - docs/buttons_available.txt
 
     # Available actions: [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]]
-    actions = [list(a) for a in it.product([0, 1], repeat=n)]
+    # actions = [list(a) for a in it.product([0, 1], repeat=n)]
+    actions = [[1,0,0], [0,1,0], [0,0,1]] # move left, move right, shoot
 
 
     # Initialize our agent with the set parameters
